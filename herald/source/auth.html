@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>The source code</title>
+  <link href="../resources/prettify/prettify.css" type="text/css" rel="stylesheet" />
+  <script type="text/javascript" src="../resources/prettify/prettify.js"></script>
+  <style type="text/css">
+    .highlight { display: block; background-color: #ddd; }
+  </style>
+  <script type="text/javascript">
+    function highlight() {
+      document.getElementById(location.hash.replace(/#/, "")).className = "highlight";
+    }
+  </script>
+</head>
+<body onload="prettyPrint(); highlight();">
+  <pre class="prettyprint lang-js">/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2015 (NumminorihSF) Konstantine Petryaev
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the &quot;Software&quot;), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+&#39;use strict&#39;;
+
+<span id='HeraldServer-Authorizer'>/**
+</span> * Module check auth of connection.
+ *      Модуль проверки возможности авторизации.
+ * @class HeraldServer.Authorizer
+ * @alternateClassName Authorizer
+ * @member HeraldServer
+ */
+
+<span id='HeraldServer-Authorizer-method-constructor'>/**
+</span> * Constructor.
+ *      Конструктор.
+ * @method constructor
+ * @param {CryptMaker} parser Object, that can parse messages.
+ *      Объект для парсинга сообщений
+ * @param {Logger | Object} [logger] Logger object. Default is {@link Logger Logger} with {@link Logger#name Logger.name} = &quot;Auth&quot;.
+ *      Объект для логгирования. По умолчанию - {@link Logger Logger} с {@link Logger#name Logger.name} = &quot;Auth&quot;.
+ * @param {String[] | RegExp[]} [whiteList]
+ * List of applications can connect. If list is empty - any is allowed. Can be RegExp&#39;s.
+ *      Список приложений, которые могут подключаться. Если список пустой - разрешены все. Можно использовать регулярные выражения.
+ * @returns {Authorizer}
+ */
+function Authorizer (parser, logger, whiteList){
+  if (whiteList &amp;&amp; !(whiteList instanceof Array)) throw Error(&#39;WRONG_ARGS&#39;);
+  this.parser = parser;
+  //if (typeof logger === &#39;string&#39;) this.logger = require(__dirname+&#39;/logger.js&#39;).getLogger(logger);
+  this.logger = logger || require(__dirname+&#39;/logger.js&#39;).getLogger(&#39;Auth&#39;);
+  this.whiteList = whiteList || [];
+
+  return this;
+}
+
+<span id='HeraldServer-Authorizer-method-check'>/**
+</span> * Check if connection is valid if not valid - return Error.
+ *      Проверяет авторизацию соединения, если не получается, или не авторизован - возвращает Error.
+ * @param {String} message Authorize message. By default should be rpc call with action &#39;authorize&#39;.
+ *      Сообщение авторизации. По умолчанию должно быть rpc с действием &#39;authorize&#39;.
+ * @param {Function} callback If not authorized - return Error. If authorized - second argument is an header from message
+ *      Если авторизация не удалась - первый аргумент - ошибка. Если удалась - первый аргумент null, второй - заголовок сообщения.
+ * @returns {Authorizer}
+ */
+Authorizer.prototype.check = function(message, callback){
+  var mes = this.parser.parseMessage(message);
+  if (!mes) return callback(new Error(&#39;NO_MESS&#39;));
+  if (!mes.header) return callback(new Error(&#39;NO_HEAD&#39;));
+  if (!mes.header.name) return callback(new Error(&#39;NO_ANON&#39;));
+  if (!mes.header.uid) return callback(new Error(&#39;NO_ANON&#39;));
+  if (mes.header.rpc !== &#39;herald-server&#39;) return callback(new Error(&#39;NEED_RPC&#39;));
+  if (mes.header.action !== &#39;authorize&#39;) return callback(new Error(&#39;NEED_RPC&#39;));
+  if (!mes.header.messId) return callback(new Error(&#39;NEED_MESS_ID&#39;));
+  if (!mes.header.actionId) return callback(new Error(&#39;NEED_ACTION_ID&#39;));
+
+  if (!mes.body) return callback(new Error(&#39;EMPTY_BODY&#39;));
+  if (!mes.body.args) return callback(new Error(&#39;EMPTY_BODY_ARGS&#39;));
+  if (mes.header.name !== mes.body.args.name) return callback(new Error(&#39;WRONG_KEY&#39;));
+  if (mes.header.uid !== mes.body.args.uid) return callback(new Error(&#39;WRONG_KEY&#39;));
+
+
+  //If whileList is not empty - try find application name in it, if not found - try check by regexps.
+  if (this.whiteList.length) {
+    var inWhiteList = false;
+    if (this.whiteList.indexOf(mes.header.name) === -1){
+      for (var i = 0; i &lt; this.whiteList.length; i++){
+        if (mes.header.name.match(this.whiteList[i])) {
+          inWhiteList = true;
+          break;
+        }
+      }
+    }
+    else inWhiteList = true;
+    if (!inWhiteList) return callback(new Error(&#39;ACCESS_DENY&#39;));
+  }
+  this.logger.info(&#39;Access granted to &#39; + mes.header.name + &#39; : &#39; + mes.header.uid);
+
+  callback(null, mes.header);
+
+  return this;
+};
+
+<span id='HeraldServer-Authorizer-static-method-createAuthorizer'>/**
+</span> * Create and return HeraldServer.Authorizer
+ * @param {CryptMaker} parser Object, that can parse messages.
+ *      Объект для парсинга сообщений
+ * @param {Logger | Object} [logger] Logger object. Default is {@link Logger Logger} with {@link Logger#name Logger.name} = &quot;Auth&quot;.
+ *      Объект для логгирования. По умолчанию - {@link Logger Logger} с {@link Logger#name Logger.name} = &quot;Auth&quot;.
+ * @param {String[] | RegExp[]} [whiteList]
+ * List of applications can connect. If list is empty - any is allowed. Can be RegExp&#39;s.
+ *      Список приложений, которые могут подключаться. Если список пустой - разрешены все. Можно использовать регулярные выражения.
+ * @static
+ * @returns {Authorizer}
+ */
+Authorizer.createAuthorizer = function (parser, logger, whiteList){
+  return new Authorizer(parser, logger, whiteList);
+};
+
+
+module.exports = Authorizer;
+
+</pre>
+</body>
+</html>

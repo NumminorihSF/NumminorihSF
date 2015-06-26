@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>The source code</title>
+  <link href="../resources/prettify/prettify.css" type="text/css" rel="stylesheet" />
+  <script type="text/javascript" src="../resources/prettify/prettify.js"></script>
+  <style type="text/css">
+    .highlight { display: block; background-color: #ddd; }
+  </style>
+  <script type="text/javascript">
+    function highlight() {
+      document.getElementById(location.hash.replace(/#/, "")).className = "highlight";
+    }
+  </script>
+</head>
+<body onload="prettyPrint(); highlight();">
+  <pre class="prettyprint lang-js">/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2015 (NumminorihSF) Konstantine Petryaev
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the &quot;Software&quot;), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+&#39;use strict&#39;;
+
+
+<span id='HeraldClient-Logger'>/**
+</span> * Default module for logging. Use console.
+ *      Модуль по умолчанию для логгирования. Использует консоль.
+ * @class HeraldClient.Logger
+ * @alternateClassName Logger
+ * @member HeraldClient
+ */
+
+<span id='HeraldClient-Logger-method-constructor'>/**
+</span> * Constructor.
+ *      Конструктор.
+ * @method constructor
+ * @param {String} name Name of Logger.
+ *      Название логгера.
+ * @returns {Logger} Logger object.
+ *      Объект логгера
+ */
+function Logger (name){
+<span id='HeraldClient-Logger-property-name'>  /**
+</span>   * Name of logger. Print every time, then log something.
+   *      Имя логгера. Выводится каждый раз, при логгировании.
+   * @type {String}
+   */
+  this.name = name;
+
+  return this;
+}
+
+<span id='HeraldClient-Logger-method-trace'>/**
+</span> * Print [TRACE] {@link Logger#name [name]} some your data to console.
+ *      Выводит [TRACE] {@link Logger#name [name]} данные для логгирования.
+ */
+Logger.prototype.trace = function(){
+  console.log(&#39;[TRACE] [&#39; + this.name + &#39;] &#39; + Array.prototype.join.call(arguments, &#39; &#39;));
+};
+
+<span id='HeraldClient-Logger-method-debug'>/**
+</span> * Print [DEBUG] {@link Logger#name [name]} some your data to console.
+ *      Выводит [DEBUG] {@link Logger#name [name]} данные для логгирования.
+ */
+Logger.prototype.debug = function(){
+  console.log(&#39;[DEBUG] [&#39; + this.name + &#39;] &#39; + Array.prototype.join.call(arguments, &#39; &#39;));
+};
+
+<span id='HeraldClient-Logger-method-info'>/**
+</span> * Print [INFO] {@link Logger#name [name]} some your data to console.
+ *      Выводит [INFO] {@link Logger#name [name]} данные для логгирования.
+ */
+Logger.prototype.info = function(){
+  console.log(&#39;[INFO] [&#39; + this.name + &#39;] &#39; + Array.prototype.join.call(arguments, &#39; &#39;));
+};
+
+<span id='HeraldClient-Logger-method-warn'>/**
+</span> * Print [WARN] {@link Logger#name [name]} some your data to console.
+ *      Выводит [WARN] {@link Logger#name [name]} данные для логгирования.
+ */
+Logger.prototype.warn = function(){
+  console.error(&#39;[WARN] [&#39; + this.name + &#39;] &#39; + Array.prototype.join.call(arguments, &#39; &#39;));
+};
+
+<span id='HeraldClient-Logger-method-error'>/**
+</span> * Print [ERROR] {@link Logger#name [name]} some your data to console.
+ *      Выводит [ERROR] {@link Logger#name [name]} данные для логгирования.
+ */
+Logger.prototype.error = function(){
+  console.error(&#39;[ERROR] [&#39; + this.name + &#39;] &#39; + Array.prototype.join.call(arguments, &#39; &#39;));
+};
+
+<span id='HeraldClient-Logger-method-fatal'>/**
+</span> * Print [FATAL] {@link Logger#name [name]} some your data to console.
+ *      Выводит [FATAL] {@link Logger#name [name]} данные для логгирования.
+ */
+Logger.prototype.fatal = function(){
+  console.error(&#39;[FATAL] [&#39; + this.name + &#39;] &#39; + Array.prototype.join.call(arguments, &#39; &#39;));
+};
+
+<span id='HeraldClient-Logger-static-method-getLogger'>/**
+</span> * Create new logger object with name.
+ *      Создает и возвращает объект логгера.
+ * @param {String} name Name of logger.
+ *      Название логгера.
+ * @static
+ * @returns {Logger} - Logger object.
+ *      Объект логгера.
+ */
+Logger.getLogger = function(name){
+  return new Logger(name);
+};
+
+module.exports = Logger;</pre>
+</body>
+</html>

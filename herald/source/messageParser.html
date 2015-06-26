@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>The source code</title>
+  <link href="../resources/prettify/prettify.css" type="text/css" rel="stylesheet" />
+  <script type="text/javascript" src="../resources/prettify/prettify.js"></script>
+  <style type="text/css">
+    .highlight { display: block; background-color: #ddd; }
+  </style>
+  <script type="text/javascript">
+    function highlight() {
+      document.getElementById(location.hash.replace(/#/, "")).className = "highlight";
+    }
+  </script>
+</head>
+<body onload="prettyPrint(); highlight();">
+  <pre class="prettyprint lang-js">/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2015 (NumminorihSF) Konstantine Petryaev
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the &quot;Software&quot;), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+&#39;use strict&#39;;
+
+<span id='HeraldServer-MessageParser'>/**
+</span> * Module to parse and make messages.
+ *      Модуль, для парсинга и создания сообщений.
+ * @class HeraldServer.MessageParser
+ * @alternateClassName MessageParser
+ * @member HeraldServer
+ */
+
+<span id='HeraldServer-MessageParser-method-constructor'>/**
+</span> * Constructor.
+ *      Конструктор.
+ * @method constructor
+ * @param {RPCWorker} rpcWorker Object to do rpc.
+ *      Объект для испольнения rpc.
+ * @param {CryptMaker|Object} [messageMaker] Object with make and parse logic.
+ *      Объект, реализующий логику создания сообщений и их парсинга.
+ * @param {String} [alg=&#39;no&#39;] Algorithm to encrypt messages.
+ *      Алгоритм шифрования сообщений.
+ * @param {String} [key] Key to encrypt messages.
+ *      Ключ шифрования.
+ * @returns {MessageParser} MessageParser object.
+ *      Объект MessageParser.
+ */
+function MessageParser (rpcWorker, messageMaker, alg, key){
+  this.rpcWorker = rpcWorker;
+  this.cm = messageMaker || new (require(&#39;crypt-maker&#39;))({algorithm: alg || &#39;no&#39;, key: key});
+  return this;
+}
+
+<span id='HeraldServer-MessageParser-method-_getHeader'>/**
+</span> * Wrapper. Обертка.
+ * @param {String} message
+ * @returns {Object|null}
+ * @private
+ */
+MessageParser.prototype._getHeader = function(message){
+  return this.cm.getHeader(message);
+};
+
+<span id='HeraldServer-MessageParser-method-_getBody'>/**
+</span> * Wrapper. Обертка.
+ * @param {String} message
+ * @returns {Object|null}
+ * @private
+ */
+MessageParser.prototype._getBody = function(message){
+  return this.cm.getBody(message);
+};
+
+<span id='HeraldServer-MessageParser-method-_replaceHeader'>/**
+</span> * Wrapper
+ * @param {Object} header
+ * @param {String} message
+ * @returns {String}
+ * @private
+ */
+MessageParser.prototype._replaceHeader = function(header, message){
+  return this.cm.replaceHeader(header, message);
+};
+
+<span id='HeraldServer-MessageParser-method-getRule'>/**
+</span> * Get info about message. Возвращает информацию о сообщении.
+ * @param {String} message Raw (encrypted) message. Сырое (зашифрованное) сообщение.
+ * @returns {Object} rule
+ * @returns {Object} rule.uidType How find socket
+ * @returns {Object} rule.mask There are fields: uidType (how search socket), mesType (type of message),
+ * mask (mask for Router to find sockets), regExp (true if mask is regexp),
+ * header (header of message). Содержит поля: uidType (правило поиска сокета), mesType (тип сообщения),
+ * mask (маска поиска сокета), regExp (true если маска это регулярное выражение),
+ * header (заголовок сообщения).
+ */
+MessageParser.prototype.getRule = function(message){
+  var header = this._getHeader(message);
+  if (header.rpc) {
+    if (header.rpc === &#39;herald-server&#39;) return {uidType: &#39;self&#39;, mesType: &#39;rpc&#39;, header: header, body: this._getBody(message)};
+    return {uidType: &#39;name&#39;, mesType:&#39;rpc&#39;, mask: header.rpc, regExp: null, header: header, raw: message};
+  }
+
+  if (header.whisp) return {uidType: &#39;name&#39;, mesType:&#39;event&#39;, mask: header.whisp, regExp: null, header: header, raw: message};
+  if (header.whispUid) return {uidType: &#39;uid&#39;, mesType:&#39;event&#39;, mask: header.whispUid, regExp: null, header: header, raw: message};
+
+  if (header.event) return {uidType: &#39;event&#39;, mesType:&#39;event&#39;, mask: header.event, regExp: null, header: header, raw: message};
+
+  if (header.rpcRes) return {uidType: &#39;uid&#39;, mesType:&#39;rpcRes&#39;, mask: header.rpcRes, regExp: null, header: header, raw: message};
+  if (header.rpcUid) return {uidType: &#39;uid&#39;, mesType:&#39;rpc&#39;, mask: header.rpcUid, regExp: null, header: header, raw: message};
+
+  if (header.rpcRegExp) return {uidType: &#39;name&#39;, mesType:&#39;rpc&#39;, mask: header.rpcRegExp, regExp: true, header: header, raw: message};
+  if (header.rpcBroad) return {uidType: &#39;name&#39;, mesType:&#39;rpc&#39;, mask: &#39;.*&#39;, regExp: true, header: header, raw: message};
+
+  return {uidType:&#39;fail&#39;, header: header};
+};
+
+<span id='HeraldServer-MessageParser-method-prepareMessage'>/**
+</span> * Prepare message to send. Fix header, replace it on raw message.
+ *      Готовит сообщение. Правит заголовок и подставляет его в сырое сообщение.
+ * @param {Object} messageRule Object, that {@link MessageParser#getRule} method returns.
+ *      Объект, возвращаемый методом {@link MessageParser#getRule}.
+ * @returns {Object|null}
+ */
+MessageParser.prototype.prepareMessage = function(messageRule){
+  if (!messageRule) return null;
+
+
+  if (messageRule.uidType === &#39;event&#39;) {}
+  else if (messageRule.mesType === &#39;event&#39;) {
+    if (messageRule.header.whisp) messageRule.header.event = &#39;whisp&#39;;
+    else if (messageRule.header.whispUid) messageRule.header.event = &#39;whisp&#39;;
+  }
+  else if (messageRule.mesType === &#39;rpcRes&#39;) {}
+  else if (messageRule.mesType === &#39;rpc&#39;){
+    if (messageRule.header.rpc) {}
+    else if (messageRule.header.rpcUid) messageRule.header.rpc = messageRule.header.rpcUid;
+    else if (messageRule.header.rpcRegExp) messageRule.header.rpc = messageRule.header.rpcRegExp;
+    else if (messageRule.header.rpcBroad) messageRule.header.rpc = messageRule.header.rpcBroad;
+  }
+
+  messageRule.raw = this._replaceHeader(messageRule.header, messageRule.raw);
+  return messageRule;
+};
+
+
+
+<span id='HeraldServer-MessageParser-method-listen'>/**
+</span> * Listen socket and parse messages. Слушает сокет и парсит сообщение.
+ * @param {net.Socket} socket
+ * @param {Object} socket.header Authorize message header. Заголовок сообщения авторизации.
+ * @param {Function} callback Function spawned for every message. Функция вызывается на каждое сообщение.
+ * @returns {*}
+ */
+MessageParser.prototype.listen = function(socket, callback){
+  if (!socket) return;
+
+  var mes = this.prepareMessage({
+    uidType: &#39;uid&#39;,
+    mesType: &#39;rpcRes&#39;,
+    mask: socket.header.uid,
+    regExp: false,
+    header: {rpcRes: socket.header.uid, messId: socket.header.messId, actionId: socket.header.actionId, action: socket.header.action},
+    body: {error: null, result: &#39;OK&#39;},
+    raw: this.cm.makeMessage({
+      header: {rpcRes: socket.header.uid, actionId: socket.header.actionId, action: socket.header.action},
+      body: {error: null, result: &#39;OK&#39;}
+    })
+  });
+  callback(mes);
+
+  var self = this;
+  var tail = &#39;&#39;;
+  function onData (chunk){
+    tail += chunk.replace(/\r\n\r\n[\r\n]*/g, &#39;\r\n\r\n&#39;);
+    var array = self.cm.splitMessagesForce(tail);
+    tail = array.pop();
+    if (tail &gt; 1048576) tail = &#39;&#39;;
+    array.map(function(raw){
+      return self.getRule(raw);
+    }).filter(function(m){
+      if (m.uidType === &#39;fail&#39;) return false;
+      if (m.uidType === &#39;self&#39;) {
+        m.body = m.body || {};
+        m.body.uid = m.header.uid;
+        self.rpcWorker.do(m.header.action, m.body, function(err, data){
+          socket.write(self.cm.makeMessage({
+            header: {rpcRes: m.header.uid, actionId: m.header.actionId, action: m.header.action},
+            body: {error: (err instanceof Error) ? err.message : err, result: data}
+          }), &#39;utf8&#39;, function(err){
+            if (err) self.logger(err);
+          });
+        });
+        return false;
+      }
+      return true;
+    }).map(function(m){
+      var rule = self.prepareMessage(m);
+      if (rule) callback(rule);
+    });
+  }
+
+  socket.on(&#39;data&#39;, onData);
+  socket.once(&#39;close&#39;, function(){
+    socket.removeListener(&#39;data&#39;, onData);
+  });
+  return true;
+};
+
+
+<span id='HeraldServer-MessageParser-method-parseMessage'>/**
+</span> * Parse message. Парсит сообщение.
+ * @param {String} message
+ * @returns {Object|null}
+ */
+MessageParser.prototype.parseMessage = function(message){
+  return this.cm.parseMessage(message);
+};
+
+
+<span id='HeraldServer-MessageParser-static-method-createParser'>/**
+</span> * Another constructor. Еще один конструктор
+ * @param {RPCWorker} rpcWorker Object to do rpc.
+ *      Объект для испольнения rpc.
+ * @param {CryptMaker|Object} [messageMaker] Object with make and parse logic.
+ *      Объект, реализующий логику создания сообщений и их парсинга.
+ * @param {String} [alg=&#39;no&#39;] Algorithm to encrypt messages.
+ *      Алгоритм шифрования сообщений.
+ * @param {String} [key] Key to encrypt messages.
+ *      Ключ шифрования.
+ * @static
+ * @returns {MessageParser}
+ */
+MessageParser.createParser = function(rpcWorker, messageMaker, alg, key){
+  return new MessageParser(rpcWorker, messageMaker, alg, key);
+};
+
+module.exports = MessageParser;</pre>
+</body>
+</html>

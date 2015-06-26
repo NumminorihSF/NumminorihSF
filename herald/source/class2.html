@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>The source code</title>
+  <link href="../resources/prettify/prettify.css" type="text/css" rel="stylesheet" />
+  <script type="text/javascript" src="../resources/prettify/prettify.js"></script>
+  <style type="text/css">
+    .highlight { display: block; background-color: #ddd; }
+  </style>
+  <script type="text/javascript">
+    function highlight() {
+      document.getElementById(location.hash.replace(/#/, "")).className = "highlight";
+    }
+  </script>
+</head>
+<body onload="prettyPrint(); highlight();">
+  <pre class="prettyprint lang-js">/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2015 (NumminorihSF) Konstantine Petryaev
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the &quot;Software&quot;), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+&#39;use strict&#39;;
+
+<span id='HeraldClient'>/**
+</span> * HeraldClient class.
+ *      Класс HeraldClient
+ * @class HeraldClient
+ * @extends event.EventEmitter
+ */
+
+<span id='HeraldClient-method-constructor'>/**
+</span> * Constructor.
+ *      Конструктор.
+ * @method constructor
+ * @param {Object} [settings] Settings for HeraldClient.
+ *      Настройки для HeraldClient.
+ * @param {Object} [settings.default] Default settings for messaging.
+ *      Настройки для сообщений по умолчанию.
+ * @param {String} [settings.name=Math.random()] Name of application or client.
+ *      Название клиента или приложения.
+ * @param {String} [settings.uid=this.name+Math.random()] Unique id of application or client.
+ *      Уникальный id приложения или клиента.
+ * @param {Logger|Object} [settings.logger] Object for log events.
+ *      Объект для логгирования событий.
+ * @param {Object} [settings.connect=&#39;{port:8765}&#39;] Object of connection properties.
+ *      Объект настроек подключения к серверу.
+ * @param {CryptMaker | Object} [settings.messageMaker] Object with make and parse logic.
+ *      Объект, реализующий логику создания сообщений и их парсинга.
+ * @param {String} [needCrypt=&#39;no&#39;] If need crypt messages - algorithm for crypt. By default doesnt encrypt.
+ *      Если необходимо шифровать сообщения - алогоритм шифрования. По умолчанию не шифрует.
+ * @param {String} [key] Encryption key.
+ *      Ключ шифрования.
+ * @returns {HeraldClient}
+ */
+function HeraldClient(settings, needCrypt, key){
+  HeraldClient.super_.call(this);
+  if (typeof settings === &#39;string&#39;){
+    key = needCrypt;
+    needCrypt = settings;
+    settings = {};
+  }
+  settings = settings || {};
+  this.default = settings.default || HeraldClient.defaultVars;
+  this.logger = settings.logger || require(__dirname+&#39;/logger.js&#39;).getLogger(&#39;H_Client&#39;);
+  this.name = String( (settings.name || settings.iAm || Math.floor(Math.random()*1000000)) );
+  this.uid = String( (settings.uid || this.name + &#39;_&#39; + Math.floor(Math.random()*1000000)) );
+
+<span id='HeraldClient-property-connected'>  /**
+</span>   * Connection status. True if connected.
+   *      Статус подключения. True если подключен.
+   * @type {boolean}
+   */
+  this.connected = false;
+
+  this.cm = settings.messageMaker || new (require(&#39;crypt-maker&#39;))({algorithm: needCrypt|| &#39;no&#39;, key: key});
+
+  this.connectProp = settings.connect || {port: 8765};
+
+
+  var self = this;
+
+  this.lastMessageId = 1;
+  this.lastActionId = 1;
+  this.messageQueue = [];
+  this.messageCallback = {};
+  this.rpcCallback = {};
+  this.isSocketFree = false;
+
+  this.rpcFunction = [];
+
+
+  this.tail = &#39;&#39;;
+  this.should_work = true;
+  this.listening = [];
+
+
+  this.on(&#39;connect&#39;, function(){
+    this.connected = true;
+    this.emit(&#39;drain&#39;);
+    setImmediate(function(){
+      for (var i = 0; i &lt; this.listening.length; i++){
+        (function(event){
+          self.rpc(&#39;herald-server&#39;, {name:&#39;subscribe&#39;, args: {event: event}}, function(err, data){
+            if (err) self.logger.error(&#39;Subscribe on reconnect fails. Event: &#39; + event + &#39;. Error: &#39; + err);
+          });
+        })(this.listening[i]);
+      }
+    }.bind(this));
+  }.bind(this));
+
+  this.on(&#39;close&#39;, function(){
+    this.connected = false;
+    this.isSocketFree = false;
+    if (this.should_work) setTimeout(function(){
+      this.connect();
+    }.bind(this), 1000);
+  }.bind(this));
+
+  this.on(&#39;drain&#39;, function(){
+    var mes = self.messageQueue.shift();
+    if (mes) {
+      var ready = self.$.write(mes.m, &#39;utf8&#39;, mes.c);
+      if (ready) process.nextTick(function(){
+        self.emit(&#39;drain&#39;)
+      });
+    }
+    else self.isSocketFree = true;
+  });
+
+  this.on(&#39;_sendAuth&#39;, function(){
+    var messages = this.messageQueue;
+    this.messageQueue = [];
+    this.isSocketFree = true;
+    this.rpc(&#39;herald-server&#39;, {name:&#39;authorize&#39;, args: {wellKnown: &#39;pHrAsE&#39;, name: this.name, uid: this.uid, rand: Math.floor(Math.random()*1000)}}, function(err, data){
+      if (!err) return this.emit(&#39;connect&#39;);
+      this.emit(&#39;error&#39;, err);
+    }.bind(this));
+    this.messageQueue = messages;
+    this.isSocketFree = false;
+  }.bind(this));
+  if (!settings.logger) this.logger.warn(&#39;No logger defined. Use default (it spawns too much messages).&#39;);
+
+  return this;
+}
+
+
+/*
+ * Get EventEmitter as prototype.
+ * Используем EventEmitter в качестве прототипа.
+ */
+(function(){
+  require(&#39;util&#39;).inherits(HeraldClient, (require(&#39;events&#39;)).EventEmitter);
+})();
+
+<span id='HeraldClient-static-property-defaultVars'>/**
+</span> * Default variables for messaging. Переменные по умолчанию для сообщений.
+ * @static
+ * @type {{retry: number, timeout: number}}
+ */
+HeraldClient.defaultVars = {
+  retry: 5,
+  timeout: 15000
+};
+
+<span id='HeraldClient-method-_fixHeader'>/**
+</span> * Add options to header.
+ * @param {Object} header - header of message
+ * @param {Object} options - options for message
+ * @private
+ */
+HeraldClient.prototype._fixHeader = function(header, options){
+  if (header.messId) return;
+  header.name = this.name;
+  header.uid = this.uid;
+  header.messId = this.lastMessageId++;
+  if (options.ack) header.ack = options.ack;
+  header.retry = (typeof options.retry === &quot;number&quot;) ? options.retry : this.default.retry;
+  header.timeout = (typeof options.timeout === &quot;number&quot;) ? options.timeout : this.default.timeout;
+};
+
+
+<span id='HeraldClient-method-rpc'>/**
+</span> * Remote procedure calling by name of application.
+ *      Удаленный вызов процедуры у одного из приложений с данным именем.
+ * @param {string} name Name of application, that you want to rpc.
+ *      Имя приложения, в котором нужно вызвать процедуру.
+ * @param {Object} action Action object, that you want to call at application.
+ *      Объект действия для удаленного выполнения.
+ * @param {string} action.name Action name to do
+ *      Название действия для удаленного выполнения.
+ * @param {string|Object} action.args Arguments for rpc or callback, if no args need to rpc - send `{}`.
+ *      Аргументы для удаленой процедуры. Если не нужны - используйте `{}`.
+ * @param {Object} [options] Options for rpc.
+ *      Опции для rpc.
+ * @param {Function} [callback] Callback for rpc. If rpc failed and no callback defined - HeraldClient will emit error.
+ * First argument for callback is Error object or null. Second is result.
+ *      Callback для удаленного вызова. Если вызов не удачен и параметр не определен - HeraldClient примет ошибку.
+ *      Первый аргумент для функции - объект ошибки или null. Второй - результат вызова.
+ * @returns {Boolean} true can send just now, false if need to send previous messages.
+ *      true если отправленно сразу, false, если необходимо подождать отправки других сообщений.
+ */
+HeraldClient.prototype.rpc = function(name, action, options, callback){
+  if (!callback){
+    if (typeof options === &#39;function&#39;) {
+      callback = options;
+      options = {};
+    }
+    else callback = function(err){
+      this.emit(&#39;error&#39;, err);
+    }.bind(this);
+  }
+
+  if (!name || typeof name !== &#39;string&#39;) return callback(new Error(&#39;WRONG_ARGS&#39;));
+  if (!action || typeof action !== &#39;object&#39;) return callback(new Error(&#39;WRONG_ARGS&#39;));
+  if (!action.name || typeof action.name !== &#39;string&#39;) return callback(new Error(&#39;WRONG_ARGS&#39;));
+  if (!(&#39;args&#39; in action)) return callback(new Error(&#39;WRONG_ARGS&#39;));
+
+  var header = {
+    rpc: name,
+    action: action.name,
+    actionId: this.lastActionId++
+  };
+
+  this._fixHeader(header, options || {});
+
+  return this._write(header, {args: action.args}, options, this._makeRpcCallback(header, callback));
+};
+
+
+<span id='HeraldClient-method-rpcUid'>/**
+</span> * Remote procedure calling by UID of application.
+ *      Удаленный вызов процедуры у одного из приложений с данным UID.
+ * @param {string} uid UID of application, that you want to rpc.
+ *      UID приложения, в котором нужно вызвать процедуру.
+ * @param {Object} action Action object, that you want to call at application.
+ *      Объект действия для удаленного выполнения.
+ * @param {string} action.name Action name to do
+ *      Название действия для удаленного выполнения.
+ * @param {string|Object} action.args Arguments for rpc or callback, if no args need to rpc - send `{}`.
+ *      Аргументы для удаленой процедуры. Если не нужны - используйте `{}`.
+ * @param {Object} [options] Options for rpc.
+ *      Опции для rpc.
+ * @param {Function} [callback] Callback for rpc. If rpc failed and no callback defined - HeraldClient will emit error.
+ * First argument for callback is Error object or null. Second is result.
+ *      Callback для удаленного вызова. Если вызов не удачен и параметр не определен - HeraldClient примет ошибку.
+ *      Первый аргумент для функции - объект ошибки или null. Второй - результат вызова.
+ * @returns {Boolean} true can send just now, false if need to send previous messages.
+ *      true если отправленно сразу, false, если необходимо подождать отправки других сообщений.
+ */
+HeraldClient.prototype.rpcUid = function(uid, action, options, callback){
+  if (!callback){
+    if (typeof options === &#39;function&#39;) {
+      callback = options;
+      options = {};
+    }
+    else callback = function(err){
+      this.emit(&#39;error&#39;, err);
+    }.bind(this);
+  }
+
+  if (!uid || typeof uid !== &#39;string&#39;) return callback(new Error(&#39;WRONG_ARGS&#39;));
+  if (!action || typeof action !== &#39;object&#39;) return callback(new Error(&#39;WRONG_ARGS&#39;));
+  if (!action.name || typeof action.name !== &#39;string&#39;) return callback(new Error(&#39;WRONG_ARGS&#39;));
+  if (!(&#39;args&#39; in action)) return callback(new Error(&#39;WRONG_ARGS&#39;));
+
+  var header = {
+    rpcUid: uid,
+    action: action.name,
+    actionId: this.lastActionId++
+  };
+
+  this._fixHeader(header, options || {});
+
+  return this._write(header, {args: action.args}, options, this._makeRpcCallback(header, callback));
+};
+
+<span id='HeraldClient-method-_makeRpcCallback'>/**
+</span> *
+ * @param header
+ * @param callback
+ * @returns {Function}
+ * @private
+ */
+HeraldClient.prototype._makeRpcCallback = function(header, callback){
+  var self = this;
+  return function(err, data){
+    if (err) return callback(err);
+    self.rpcCallback[header.actionId] = function(err, data){
+      delete self.rpcCallback[header.actionId];
+      clearTimeout(timeout);
+      return callback(err, data);
+    };
+
+    var timeout = setTimeout(function(){
+      self.rpcCallback[header.actionId] &amp;&amp; self.rpcCallback[header.actionId](new Error(&#39;RPC_TIMEOUT&#39;));
+    }, header.timeout);
+  }
+};
+
+
+<span id='HeraldClient-method-write'>/**
+</span> * Send some message to server. Отправить сообщение серверу.
+ * @param {Object} header Header of message.
+ *      Заголовок сообщения.
+ * @param {Object|string} body Body of message.
+ *      Тело сообщения.
+ * @param {Object} [options] Options for message.
+ *      Настройки сообщения.
+ * @param {Function} [callback]
+ * @returns {Boolean} true can send just now, false if need to send previous messages.
+ *      true если отправленно сразу, false, если необходимо подождать отправки других сообщений.
+ */
+HeraldClient.prototype.write = function(header, body, options, callback){
+  if (!callback){
+    if (typeof options === &#39;function&#39;) {
+      callback = options;
+      options = {};
+    }
+    else callback = function(err){
+      this.emit(&#39;error&#39;, err);
+    }.bind(this);
+  }
+
+  return this._write(header, body, options, callback);
+};
+
+
+<span id='HeraldClient-method-_write'>/**
+</span> * Add field to header, apply options
+ * @param {Object} header
+ * @param {Object} body
+ * @param {Object} [options]
+ * @param {Function} [callback]
+ * @private
+ */
+HeraldClient.prototype._write = function(header, body, options, callback){
+  this._fixHeader(header, options || {});
+  var self = this;
+  var timeout = setTimeout(function(){
+    //remove element, where callback is this function. stop if find it.
+    self.messageQueue.some(function(elem, index){
+      if (elem.c === self.messageCallback[header.messId]) {
+        self.messageQueue.splice(index, 1);
+        return true;
+      }
+      return false;
+    });
+
+    self.messageCallback[header.messId] &amp;&amp; self.messageCallback[header.messId](new Error(&#39;SEND_TIMEOUT&#39;));
+
+  }, header.timeout);
+
+  this.messageCallback[header.messId] = function(err, res){
+    clearTimeout(timeout);
+    delete self.messageCallback[header.messId];
+    callback(err, res);
+  };
+
+  return this._writeMessage(this.cm.makeMessage({header: header, body: body}), this.messageCallback[header.messId]);
+};
+
+
+<span id='HeraldClient-method-_writeMessage'>/**
+</span> * Write message and watch
+ * @param message
+ * @param {Function} callback
+ * @returns {*}
+ * @private
+ */
+HeraldClient.prototype._writeMessage = function(message, callback){
+  //check callback function, create if need
+  if (!callback) callback = function(err){if (err) this.emit(&#39;error&#39;, ((err in Error)?err:new Error(err)));}.bind(this);
+
+  if (!message) return callback(new Error(&#39;EMPTY_MESSAGE&#39;));
+  if (this.isSocketFree) {
+    if (!this.messageQueue.length){
+      return this.isSocketFree = this.$.write(message, &#39;utf-8&#39;, callback);
+    }
+    this.messageQueue.push({m: message, c: callback});
+    this.emit(&#39;drain&#39;);
+    return false;
+  }
+  else this.messageQueue.push({m: message, c: callback});
+  return false;
+};
+
+
+<span id='HeraldClient-method-_doRpc'>/**
+</span> * Find rpc call and use
+ * @param {string} action
+ * @param {Object} headerPart
+ * @param {Object} body
+ * @param {Object} body.args
+ * @param {Function} callback
+ * @returns {*}
+ * @private
+ */
+HeraldClient.prototype._doRpc = function(action, headerPart, body, callback){
+  if (!body || !body.args) return callback(new Error(&#39;WRONG_ARGS&#39;));
+  if (!this.rpcFunction[action]) return callback(new Error(&#39;WRONG_ACTION&#39;));
+  if (this.rpcFunction[action].length === 2) return this.rpcFunction[action](body.args, callback);
+  return this.rpcFunction[action](headerPart, body.args, callback);
+};
+
+
+<span id='HeraldClient-method-remoteProcedure'>/**
+</span> * Function for remote calling. It is callback for {@link HeraldClient#addRpcWorker} method.
+ * If function has 2 arguments, caller will not send to it.
+ *      Функция для удаленного вызова. Передается как callback в метод {@link HeraldClient#addRpcWorker}.
+ *      Если у функции 2 аргумента - caller не будет передан.
+ * @method remoteProcedure
+ * @member HeraldClient
+ * @param {Object} [caller] UID and name of application that called this.
+ *      UID и название приложения, вызвавшего функцию.
+ * @param {Object} args Arguments for call. Аргументы для вызова.
+ * @param {Function} callback Callback function to return result. First arg is Error object or null. Second response data if is.
+ *      Функция для возврата результатов. Первый аргумент - объект ошибки или null. Второй - результат.
+ */
+
+
+<span id='HeraldClient-method-addRpcWorker'>/**
+</span> * Add function to work with rpc calls.
+ *      Добавляет функцию для удаленного использования.
+ * @param {String} actionName Action name. Название действия.
+ * @param {Function} callback Function to call. {@link HeraldClient#remoteProcedure Should be like this}.
+ *      Вызываемая функция. {@link HeraldClient#remoteProcedure Должна соответствовать этому шаблону}.
+ * @returns {Boolean} True if added. false if was function with such name.
+ * False means, that you should remove old rpc function with such actionName.
+ *      True если добавленно. false если есть функция с таким именем.
+ *      False означает, что Вам необходимо удалить старую функцию с таким названием действия.
+ */
+HeraldClient.prototype.addRpcWorker = function(actionName, callback){
+  if (this.rpcFunction[actionName]) return false;
+  this.rpcFunction[actionName] = callback;
+  return true;
+};
+
+
+<span id='HeraldClient-method-removeRpcWorker'>/**
+</span> * Remove rpc function. Удаляет функцию из используемых.
+ * @param {String} actionName Action name. Название действия.
+ * @returns {Boolean} true if was such function. Else returns false.
+ *    true если такая функция была. false, если нет.
+ */
+HeraldClient.prototype.removeRpcWorker = function(actionName){
+  var answer = actionName in this.rpcFunction;
+  delete this.rpcFunction[actionName];
+  return answer;
+};
+
+
+<span id='HeraldClient-method-_parseMessage'>/**
+</span> * Parse encrypted message and think, what should do with it
+ * @param message
+ * @returns {*}
+ * @private
+ */
+HeraldClient.prototype._parseMessage = function(message){
+  var header = this.cm.getHeader(message);
+  var self = this;
+  if (!header || !header.messId) return;
+  if (header.rpc) {
+    if (header.action == &#39;_ping&#39;) return this._pong({header: header, body:Math.floor(Math.random()*1000-500)});
+    return this._doRpc(header.action, {name: header.name, uid: header.uid}, this.cm.getBody(message), function(err, data){
+      self._write(
+        {rpcRes: header.uid, actionId: header.actionId, action: header.action},
+        {error: (err instanceof Error)?err.message:err, result: data},
+        {retry: 0, timeout: 10000},
+        function(){}
+      );
+    });
+  }
+
+  if (header.event) return this.emit(header.event, {name: header.name, uid: header.uid}, this.cm.getBody(message));
+
+  if (header.rpcRes) {
+    if (this.rpcCallback[header.actionId]) {
+      var body = this.cm.getBody(message);
+      if (body) return this.rpcCallback[header.actionId](body.error, body.result);
+    }
+  }
+};
+
+
+<span id='HeraldClient-method-_pong'>/**
+</span> * Send pong message to server
+ * @param message
+ * @private
+ */
+HeraldClient.prototype._pong = function(message){
+  delete message.header.rpcBroad;
+  message.header.rpcRes = message.header.uid;
+  message.header.event = &#39;pong&#39;;
+  this.write(message.header, message.body, function(){});
+};
+
+
+<span id='HeraldClient-method-subscribe'>/**
+</span> * Subscribe to events. Spawn callback for every event with such name.
+ *      Подписывает на события. Вызывает Callback каждый раз, когда происходит событие.
+ * @param {String} eventName
+ * @param {Function} callback First argument is header part with name and uid of application spawned event. Second argument is bode of event message.
+ *      Первый аргумент - часть заголовка сообщения с полями названия и uid приложения, запустившего событие. Вторйо аргумент - тело сообщения.
+ */
+HeraldClient.prototype.subscribe = function(eventName, callback){
+  this.on(eventName, callback);
+  if (this.listening.indexOf(eventName) === -1) {
+    this.rpc(&#39;herald-server&#39;, {name:&#39;subscribe&#39;, args: {event: eventName}}, function(err, data){
+      if (err) {
+        this.logger.error(&#39;SubscribeError&#39;, err);
+        return this.emit(&#39;error&#39;, err);
+      }
+    }.bind(this));
+    this.listening.push(eventName);
+  }
+};
+
+<span id='HeraldClient-method-unsubscribe'>/**
+</span> * Unsubscribe from event(remove all listeners).
+ *      Отписывает от событий на сервере.
+ * @param {String} eventName
+ * @param {Function} callback
+ */
+HeraldClient.prototype.unsubscribe = function(eventName, callback){
+
+  this.rpc(&#39;herald-server&#39;, {name:&#39;unsubscribe&#39;, args: {event: eventName}}, function(err, data){
+    if (typeof callback === &#39;function&#39;) process.nextTick(function(){callback(err, data)});
+    if (err) {
+      return this.emit(&#39;error&#39;, err);
+    }
+    this.removeAllListeners(eventName);
+    if (this.listening.indexOf(eventName) !== -1) this.listening.splice(this.listening.indexOf(eventName), 1);
+  }.bind(this));
+};
+
+<span id='HeraldClient-method-publish'>/**
+</span> * Publish some event.
+ *      Пибликует событие.
+ * @param {String} event
+ * @param {Object|String} body
+ * @param {Function} callback
+ */
+HeraldClient.prototype.publish = function(event, body, callback){
+  this.write({event:event}, body, function(err, data){
+    if (callback) callback(err, data);
+    else if (err) this.emit(&#39;error&#39;, err);
+  });
+};
+
+<span id='HeraldClient-method-whisp'>/**
+</span> * Whisper some event message to some app with name.
+ *      Отправляет сообщение о событии приложению с определенным именем.
+ * @param {String} whom Name of application to send message.
+ *      Название приложения, куда отправлять сообщение.
+ * @param {String} event Name of event. Название события.
+ * @param {Object|String} body Body of event. Тело события.
+ * @param {Function} callback
+ * @returns {Boolean} true can send just now, false if need to send previous messages.
+ *      true если отправленно сразу, false, если необходимо подождать отправки других сообщений.
+ */
+HeraldClient.prototype.whisp = function(whom, event, body, callback){
+  return this.write({whisp: whom, event: event}, body, callback);
+};
+
+
+
+<span id='HeraldClient-method-whispUid'>/**
+</span> * Whisper some event message to some app with uid.
+ *      Отправляет сообщение о событии приложению с определенным uid.
+ * @param {String} whomUid uid of application to send message.
+ *      uid приложения, куда отправлять сообщение.
+ * @param {String} event Name of event. Название события.
+ * @param {Object|String} body Body of event. Тело события.
+ * @param {Function} callback
+ * @returns {Boolean} true can send just now, false if need to send previous messages.
+ *      true если отправленно сразу, false, если необходимо подождать отправки других сообщений.
+ */
+HeraldClient.prototype.whispUid = function(whomUid, event, body, callback){
+  this.write({whispUid: whomUid, event: event}, body, callback);
+};
+
+
+<span id='HeraldClient-method-connect'>/**
+</span> * Connect to server. Подключает к серверу.
+ * @param {Object} [settings] Settings for connect. Default get from HeraldClient object.
+ *      Настройки для подключения. По умолчанию берет растройки из самого объекта.
+ */
+HeraldClient.prototype.connect = function(settings){
+  if (this.connected) return;
+  this.should_work = true;
+  this.connectProp = settings || this.connectProp || {port: 8765};
+
+  if (this.$) this.$.removeAllListeners();
+
+  this.$ = require(&#39;net&#39;).createConnection(this.connectProp);
+
+//  if (!this.messageQueue.length) this.rpc(&#39;herald-server&#39;, {name:&#39;authorize&#39;, args: {wellKnown: &#39;pHrAsE&#39;, name: this.name, uid: this.uid, time: new Date()}}, function(err, data){}.bind(this));
+
+  var self = this;
+
+
+  this.$.on(&#39;connect&#39;, function(){
+
+    this.emit(&#39;_sendAuth&#39;);
+
+    this.$.setEncoding(&#39;utf-8&#39;);
+
+    this.$.on(&#39;data&#39;, function(data){
+      this.logger.trace(&#39;SOCKET_IN:&#39;, JSON.stringify(data));
+      this.tail += data.replace(/\r\n\r\n[\r\n]*/g, &#39;\r\n\r\n&#39;);
+      var array = this.cm.splitMessagesForce(this.tail);
+      this.tail = array.pop();
+      if (this.tail &gt; 1048576) this.tail = &#39;&#39;;
+      for (var i = 0; i &lt; array.length; i++) {
+        (function (message) {
+          this._parseMessage(message);
+        }.bind(this))(array[i])
+      }
+    }.bind(this));
+  }.bind(this));
+  
+  this.$.on(&#39;close&#39;, function(e){
+    this.$.removeAllListeners(&#39;data&#39;);
+    this.emit(&#39;close&#39;, e);
+  }.bind(this));
+
+  this.$.on(&#39;error&#39;, function(e){
+    this.emit(&#39;error&#39;, e);
+  }.bind(this));
+  
+  this.$.on(&#39;drain&#39;, function(){
+    setImmediate(function(){this.emit(&#39;drain&#39;);}.bind(this));
+  }.bind(this));
+};
+
+<span id='HeraldClient-method-close'>/**
+</span> * Close connect. Закрывает подключение.
+ * @param {Function} [callback]
+ */
+HeraldClient.prototype.close = function(callback){
+  this.should_work = false;
+  this.$.end();
+  if (typeof callback === &#39;function&#39;) this.once(&#39;close&#39;, callback);
+};
+
+<span id='HeraldClient-method-end'>/**
+</span> * Close connect. Закрывает подключение.
+ * @param {Function} [callback]
+ */
+HeraldClient.prototype.end = function(callback){
+  this.should_work = false;
+  this.$.end();
+  if (typeof callback === &#39;function&#39;) this.once(&#39;close&#39;, callback);
+};
+
+<span id='HeraldClient-method-unref'>/**
+</span> * Unref client.
+ * @experimental
+ * @returns {*}
+ */
+HeraldClient.prototype.unref = function(){
+  this.$.unref();
+};
+
+<span id='HeraldClient-method-ref'>/**
+</span> * Ref client.
+ * @experimental
+ * @returns {*}
+ */
+HeraldClient.prototype.ref = function(){
+  this.$.ref();
+};
+
+<span id='HeraldClient-method-createClient'>/**
+</span> * One more constructor.
+ *      Еще один конструктор.
+ * @param {Object} [settings] Settings for HeraldClient.
+ *      Настройки для HeraldClient.
+ * @param {Object} [settings.default] Default settings for messaging.
+ *      Настройки для сообщений по умолчанию.
+ * @param {String} [settings.name=Math.random()] Name of application or client.
+ *      Название клиента или приложения.
+ * @param {String} [settings.uid=settings.name+Math.random()] Unique id of application or client.
+ *      Уникальный id приложения или клиента.
+ * @param {Logger|Object} [settings.logger] Object for log events.
+ *      Объект для логгирования событий.
+ * @param {Object} [settings.connect=`{port:8765}`] Object of connection properties.
+ *      Объект настроек подключения к серверу.
+ * @param {CryptMaker | Object} [settings.messageMaker] Object with make and parse logic.
+ *      Объект, реализующий логику создания сообщений и их парсинга.
+ * @param {String} [needCrypt=&#39;no&#39;] If need crypt messages - algorithm for crypt. By default doesn&#39;t encrypt.
+ *      Если необходимо шифровать сообщения - алогоритм шифрования. По умолчанию не шифрует.
+ * @param {String} [key] Encryption key.
+ *      Ключ шифрования.
+ * @returns {HeraldClient}
+ */
+HeraldClient.createClient = function(settings, needCrypt, key){
+  var hc = new HeraldClient(settings, needCrypt, key);
+  hc.connect();
+  return hc;
+};
+
+module.exports = HeraldClient;
+</pre>
+</body>
+</html>
